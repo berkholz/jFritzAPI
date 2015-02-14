@@ -24,19 +24,29 @@ import org.w3c.dom.Document;
 import org.xml.sax.SAXException;
 
 /**
- * Holds a connection to a FRITZ!BOX.
+ * Init a connection to a FRITZ!BOX.
  *
  * @author Marcel Berkholz
  */
 public class FritzConnection {
 
+    /**
+     * Username to establish the connectin with.
+     */
     String username;
+    /**
+     * Password of the username, which is required to establish a connectin to
+     * the FritzBox.
+     */
     String password;
     String challenge;
     String sid;
-    URL targetSite;
+    String baseURLofFritzBox;
     HttpURLConnection urlConnection;
 
+    /*
+     * CONSTRUCTORS
+     */
     /**
      * Create a FritzConnection and authenticate with the given username and
      * password.
@@ -48,11 +58,30 @@ public class FritzConnection {
     public FritzConnection(String username, String password) {
         this.username = username;
         this.password = password;
+        this.baseURLofFritzBox = "http://fritz.box/";
     }
 
     /**
+     * Create a FritzConnection and authenticate with the given username and
+     * password.
+     *
+     * @param username Username of the Fritz!Box user which has rights to manage
+     * settings of the Fritz!Box.
+     * @param password Password of the Fritz!Box user.
+     * @param targetURL Base URL of the FritzBox, e.g. http://fritz.box/.
+     */
+    public FritzConnection(String username, String password, String targetURL) {
+        this.username = username;
+        this.password = password;
+        this.baseURLofFritzBox = targetURL;
+    }
+
+    /*
+     * GETTER AND SETTER
+     */
+    /**
      * Get the username of the FritzConnection.
-     * 
+     *
      * @return The username of the FritzConnection.
      */
     public String getUsername() {
@@ -61,6 +90,7 @@ public class FritzConnection {
 
     /**
      * Set the username which shall be used for the FritzConnection.
+     *
      * @param username Username for the FritzConnection.
      */
     public void setUsername(String username) {
@@ -68,7 +98,8 @@ public class FritzConnection {
     }
 
     /**
-     *  Get the password of the username of the FritzConnection.
+     * Get the password of the username of the FritzConnection.
+     *
      * @return The password of the username of the FritzConnection.
      */
     public String getPassword() {
@@ -84,8 +115,8 @@ public class FritzConnection {
     }
 
     /**
-     *  Get the challenge of the FritzConnection.
-     * 
+     * Get the challenge of the FritzConnection.
+     *
      * @return The challenge of the FritzConnection.
      */
     public String getChallenge() {
@@ -120,51 +151,55 @@ public class FritzConnection {
      *
      * @return
      */
-    public URL getTargetSite() {
-        return targetSite;
+    public String getBaseURLofFritzBox() {
+        return baseURLofFritzBox;
     }
 
     /**
      *
      * @param internetsite
-     * @throws MalformedURLException
      */
-    public void setTargetSite(String internetsite) throws MalformedURLException {
-        this.targetSite = new URL(internetsite);
+    public void setBaseURLofFritzBox(String internetsite) {
+        this.baseURLofFritzBox = internetsite;
     }
 
+    /* 
+     * METHODS
+     */
     /**
-     *
-     * @return
+     * Initialize the HTTP connection to the FritzBox.
      */
     public void initConnection() {
         try {
-            urlConnection = (HttpURLConnection) targetSite.openConnection();
+            urlConnection = (HttpURLConnection) new URL(baseURLofFritzBox + "login_sid.lua").openConnection();
         } catch (IOException ex) {
             Logger.getLogger(FritzConnection.class.getName()).log(Level.SEVERE, null, ex);
         }
     }
 
+    /**
+     * Initialize the sid
+     */
     public void initSid() {
         Document doc = null;
 
-        // XPATH-Element zum Parsen über das Document
+        // XPATH-element to parse over the xml document.
         XPath xpath = XPathFactory.newInstance().newXPath();
         Logger.getLogger(FritzConnection.class.getName()).log(Level.INFO, "Getting XPath instance to parse XML.");
 
         try {
             doc = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(urlConnection.getInputStream());
-            Logger.getLogger(FritzConnection.class.getName()).log(Level.INFO, "Saving XML content of URL in a Document Object.");
-
+            Logger.getLogger(FritzConnection.class.getName()).log(Level.INFO, "Saving XML content of URL in a Document Object: {0}", FritzHelper.documentToString(doc));
         } catch (ParserConfigurationException | IOException | SAXException ex) {
-            Logger.getLogger(FritzConnection.class
-                    .getName()).log(Level.SEVERE, null, ex);
+            Logger.getLogger(FritzConnection.class.getName()).log(Level.SEVERE, ex.getLocalizedMessage(), ex);
         }
 
         try {
+            // extract the sid from the xml document
             this.sid = (String) xpath.evaluate("//SID", doc, XPathConstants.STRING);
             Logger.getLogger(FritzConnection.class.getName()).log(Level.INFO, "Getting SID ({0}) via XPath", sid);
 
+            // get the challange response
             this.challenge = (String) xpath.evaluate("//Challenge", doc, XPathConstants.STRING);
             Logger.getLogger(FritzConnection.class.getName()).log(Level.INFO, "Getting challenge ({0}) via XPath", challenge);
         } catch (XPathExpressionException ex) {
@@ -173,27 +208,26 @@ public class FritzConnection {
     }
 
     /**
+     * Check if the sid is valid.
      *
-     * @return True if
+     * @return Returns true if the sid is valid, otherwise false.
      */
     public boolean isSidValid() {
-        if ("0000000000000000".equals(this.sid)) {
-            return false;
-        } else {
-            return true;
-        }
+        // if sid is 0000000000000000 we have in invalid sid.
+        return !"0000000000000000".equals(this.sid);
     }
 
     /**
-     * 
+     * Get a new sid when old sid is invalid.
+     *
      */
     public void reloadSid() {
         if (!isSidValid()) {
-            String newUrl = targetSite.getProtocol() + "://" + targetSite.getHost() + targetSite.getFile() + "?username=" + username + "&response=" + FritzHelper.getResponse(challenge, password);
-            Logger.getLogger(FritzConnection.class.getName()).log(Level.INFO, "Setting URL: " + newUrl);
+            String newUrl = baseURLofFritzBox + "login_sid.lua" + "?username=" + username + "&response=" + FritzHelper.getResponse(challenge, password);
+            Logger.getLogger(FritzConnection.class.getName()).log(Level.INFO, "Setting URL: {0}", newUrl);
 
             try {
-                Logger.getLogger(FritzConnection.class.getName()).log(Level.INFO, "Opening connection to URL: " + newUrl);
+                Logger.getLogger(FritzConnection.class.getName()).log(Level.INFO, "Opening connection to URL: {0}", newUrl);
                 urlConnection = (HttpURLConnection) new URL(newUrl).openConnection();
 
                 Logger.getLogger(FritzConnection.class.getName()).log(Level.INFO, "Saving XML content of URL in a Document Object.");
@@ -203,7 +237,7 @@ public class FritzConnection {
                 XPath xpath = XPathFactory.newInstance().newXPath();
 
                 sid = (String) xpath.evaluate("//SID", doc, XPathConstants.STRING);
-                Logger.getLogger(FritzConnection.class.getName()).log(Level.INFO, "Getting SID (" + sid + ") via XPath");
+                Logger.getLogger(FritzConnection.class.getName()).log(Level.INFO, "Getting SID ({0}) via XPath", sid);
             } catch (IOException | ParserConfigurationException | XPathExpressionException | SAXException ex) {
                 Logger.getLogger(FritzConnection.class.getName()).log(Level.SEVERE, null, ex);
             }
@@ -211,7 +245,7 @@ public class FritzConnection {
     }
 
     /**
-     * 
+     *
      */
     public void connect() {
         initConnection();
@@ -219,8 +253,10 @@ public class FritzConnection {
         reloadSid();
     }
 
+
+
     /**
-     * 
+     *
      */
     public void test() {
         try {
@@ -242,29 +278,38 @@ public class FritzConnection {
 
             //print result
             System.out.println(response.toString());
+
         } catch (IOException ex) {
-            Logger.getLogger(FritzConnection.class.getName()).log(Level.SEVERE, null, ex);
+            Logger.getLogger(FritzConnection.class
+                    .getName()).log(Level.SEVERE, null, ex);
         }
     }
 
     /**
-     * 
+     * Trigger a disconnect of the connection to the FritzBox!.
+     *
      * @throws XPathExpressionException
      * @throws ParserConfigurationException
      * @throws MalformedURLException
      * @throws IOException
      * @throws SAXException
-     * @throws TransformerException 
+     * @throws TransformerException
      */
     public void disconnect() throws XPathExpressionException, ParserConfigurationException, MalformedURLException, IOException, SAXException, TransformerException {
         if (isSidValid()) {
             String newUrl = "http://fritz.box/home/home.lua?sid=" + this.sid + "&logout=1";
-            Logger.getLogger(FritzConnection.class.getName()).log(Level.INFO, "Calling {0} to logout.", newUrl);
+            Logger
+                    .getLogger(FritzConnection.class
+                            .getName()).log(Level.INFO, "Calling {0} to logout.", newUrl);
 
             urlConnection = (HttpURLConnection) new URL(newUrl).openConnection();
+
             this.sid = null;
+
             urlConnection.disconnect();
-            Logger.getLogger(FritzConnection.class.getName()).log(Level.INFO, "Connection disconnected.");
+
+            Logger.getLogger(FritzConnection.class
+                    .getName()).log(Level.INFO, "Connection disconnected.");
         }
     }
 }
